@@ -10,11 +10,18 @@
 #include <poll.h>
 #include <errno.h>
 #include <time.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <sys/ipc.h>
+#include <sys/msg.h>
+#include <sys/wait.h>
 
 #define SERV_TCP_PORT 25000
 #define MAX_CLI 10
 #define MAX_BUF 256
 #define MAX_ALRT 50
+
+/* Commands and Responses */
 #define ERR_PIN "ERR_PIN"
 #define ERR_ID "ERR_ID"
 #define ERR_BAL "ERR_BAL"
@@ -26,6 +33,11 @@
 #define DEP "DEP"
 #define LGOUT "LGOUT"
 #define delim '|'
+
+#define FIFO_NAME "atm_fifo"
+#define LOG_FILE "log.txt"
+#define MSG_KEY 1234
+#define EXIT "EXIT"
 
 struct q_entry {
 	long mtype;
