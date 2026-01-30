@@ -1,6 +1,13 @@
 /* server.c */
 #include "common.h"
 
+int server_login(int);
+int server_checkbal();
+int server_withdraw();
+int serve_deposit();
+int alert_error(char*);
+int update_log(char*, char*, char*);
+
 int main() {
 	int sockfd, cli_len, nready, max_i, nrecv;
 	struct pollfd pollfds[MAX_CLI];
@@ -15,19 +22,19 @@ int main() {
 	if(fork() == 0) {
 		printf("Starting logger module...\n");
 		//execl("./logger", "logger", (char *) 0);
-		//perror("\n!execl() failed!\n");
+		//perror("!execl() failed!");
 		exit(1);
 	}
 	
 	printf("Creating socket...\n");
 	if((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-		perror("Server: socket() error\n");
+		perror("!socket() error!");
 		exit(1);
 	}
 	
 	printf("Binding socket...\n");
 	if((bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr))) < 0) {
-		perror("Server: bind() error\n");
+		perror("!bind() error!");
 		exit(1);
 	}
 
@@ -61,7 +68,7 @@ int main() {
 			}
 				
 			if(i == MAX_CLI) {
-				perror("\n!Too many clients!\n");
+				perror("!Too many clients!");
 				exit(1);
 			}
 			
@@ -79,7 +86,7 @@ int main() {
 					if(errno == ECONNRESET) {
 						close(curfd);
 						pollfds[i].fd = -1;
-					} else perror("\n!Read error!\n");
+					} else perror("!Read error!");
 					break;
 						
 					case 0:
@@ -87,8 +94,7 @@ int main() {
 					pollfds[i].fd = -1;
 					break;
 					
-					default:
-					/* Client data handling here */
+					default: /* Client data handling here */
 					if(nrecv < MAX_BUF) buf[nrecv] = '\0';
 					
 					if(strncmp(buf, "LGOUT", 5) == 0) {
@@ -96,6 +102,8 @@ int main() {
 						close(curfd);
 						pollfds[i].fd = -1;
 						break;
+					} else if(strncmp(buf, "LGN", 3) == 0) {
+						server_login(curfd, buf);
 					}
 					
 					printf("Receive message %s from client %s.\n", buf, inet_ntoa(cli_addr.sin_addr));
@@ -107,4 +115,54 @@ int main() {
 		}
 	}
 	close(sockfd);
+}
+
+int update_log(char* sid, char* cmd, char* rsp) {
+	time_t now = time(NULL);
+	char* timestamp = ctime(&now);
+	char log_entry[MAX_LOG];
+	
+	timestamp[strcspn(timestamp, "\n")] = 0;
+	
+	snprintf(log_entry, MAX_LOG, "[%s]|%s|%s|%s", timestamp, sid, cmd, rsp);
+	printf("Log entry: %s\n", log_entry);
+	
+	/* Logger operation here */
+	
+	return(0);
+}
+
+int alert_error(char* sid) {
+	struct q_entry alert_msg;
+	int id = atoi(sid);
+	char* msg = "[ALERT!!!] wrong PIN entered.";
+	
+	alert_msg.mtype = (long) id;
+	strncpy(alert_msg.mtext, msg, MAX_ALERT);
+	
+	/* Logger operation here */
+	
+	return(0);
+}
+
+int server_login(int sockfd, char* cmd) {
+	char* sid = "1111";
+	int valid_id = 0, valid_pin = 0;
+	
+	/* Database control here */
+	
+	if(!valid_id) {
+		if(send(sockfd, ERR_ID, strlen(ERR_ID) + 1, 0) < 0) perror("!Send failed!");
+		update_log(sid, cmd, ERR_ID);
+		return(-1);
+	} else if(!valid_pin) {
+		if(send(sockfd, ERR_PIN, strlen(ERR_PIN) + 1, 0) < 0) perror("!Send failed!");
+		update_log(sid, cmd, ERR_PIN);
+		alert_error(sid);
+		return(-1);
+	} 
+	
+	if(send(sockfd, OK, strlen(OK) + 1, 0) < 0) perror("!Send failed!");
+	update_log(sid, cmd, OK);
+	return(0);
 }
