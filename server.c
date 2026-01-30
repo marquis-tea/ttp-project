@@ -1,10 +1,10 @@
 /* server.c */
 #include "common.h"
 
-int server_login(int);
-int server_checkbal();
-int server_withdraw();
-int serve_deposit();
+int server_login(int, char*);
+int server_checkbal(int, char*);
+int server_withdraw(int, char*);
+int server_deposit(int, char*);
 int alert_error(char*);
 int update_log(char*, char*, char*);
 
@@ -94,7 +94,8 @@ int main() {
 					pollfds[i].fd = -1;
 					break;
 					
-					default: /* Client data handling here */
+					default: 
+					/* Client data handling here */
 					if(nrecv < MAX_BUF) buf[nrecv] = '\0';
 					
 					if(strncmp(buf, "LGOUT", 5) == 0) {
@@ -102,9 +103,10 @@ int main() {
 						close(curfd);
 						pollfds[i].fd = -1;
 						break;
-					} else if(strncmp(buf, "LGN", 3) == 0) {
-						server_login(curfd, buf);
-					}
+					} else if(strncmp(buf, LGN, strlen(LGN)) == 0) server_login(curfd, buf);
+					else if(strncmp(buf, BAL, strlen(BAL)) == 0) server_checkbal(curfd, buf);
+					else if(strncmp(buf, WDW, strlen(WDW)) == 0) server_withdraw(curfd, buf);
+					else if(strncmp(buf, DEP, strlen(DEP)) == 0) server_deposit(curfd, buf);
 					
 					printf("Receive message %s from client %s.\n", buf, inet_ntoa(cli_addr.sin_addr));
 					break;
@@ -120,12 +122,12 @@ int main() {
 int update_log(char* sid, char* cmd, char* rsp) {
 	time_t now = time(NULL);
 	char* timestamp = ctime(&now);
-	char log_entry[MAX_LOG];
+	char buf[MAX_BUF];
 	
 	timestamp[strcspn(timestamp, "\n")] = 0;
 	
-	snprintf(log_entry, MAX_LOG, "[%s]|%s|%s|%s", timestamp, sid, cmd, rsp);
-	printf("Log entry: %s\n", log_entry);
+	snprintf(buf, MAX_BUF, "[%s]|%s|%s|%s", timestamp, sid, cmd, rsp);
+	printf("Log entry: %s\n", buf);
 	
 	/* Logger operation here */
 	
@@ -138,7 +140,7 @@ int alert_error(char* sid) {
 	char* msg = "[ALERT!!!] wrong PIN entered.";
 	
 	alert_msg.mtype = (long) id;
-	strncpy(alert_msg.mtext, msg, MAX_ALERT);
+	strncpy(alert_msg.mtext, msg, strlen(msg) + 1);
 	
 	/* Logger operation here */
 	
@@ -146,7 +148,7 @@ int alert_error(char* sid) {
 }
 
 int server_login(int sockfd, char* cmd) {
-	char* sid = "1111";
+	char* sid = "1111"; // Change this later
 	int valid_id = 0, valid_pin = 0;
 	
 	/* Database control here */
@@ -164,5 +166,54 @@ int server_login(int sockfd, char* cmd) {
 	
 	if(send(sockfd, OK, strlen(OK) + 1, 0) < 0) perror("!Send failed!");
 	update_log(sid, cmd, OK);
+	return(0);
+}
+
+int server_checkbal(int sockfd, char* cmd) {
+	char* sid = "1111"; // Change this later
+	int balance = 100; // Change this later
+	char buf[MAX_BUF];
+	
+	/* Database control here */
+	
+	snprintf(buf, MAX_BUF, "%s:%d", VAL, balance); /* Concatenate VAL:balance */
+	
+	if(send(sockfd, buf, strlen(buf) + 1, 0) < 0) perror("!Send failed!");
+	update_log(sid, cmd, buf);
+	return(0);
+}
+
+int server_withdraw(int sockfd, char* cmd) {
+	char* sid = "1111"; // Change this later
+	int balance = 100; // Change this later
+	int suff_bal = 0;
+	char buf[MAX_BUF];
+	
+	/* Database control here */
+	
+	if(!suff_bal) {
+		if(send(sockfd, ERR_BAL, strlen(ERR_BAL) + 1, 0) < 0) perror("!Send failed!");
+		update_log(sid, cmd, ERR_BAL);
+		return(-1);
+	}
+	
+	snprintf(buf, MAX_BUF, "%s:%d", OK, balance); /* Concatenate OK:new_bal */
+	
+	if(send(sockfd, buf, strlen(buf) + 1, 0) < 0) perror("!Send failed!");
+	update_log(sid, cmd, buf);
+	return(0);
+}
+
+int server_deposit(int sockfd, char* cmd) {
+	char* sid = "1111"; // Change this later
+	int balance = 100; // Change this later
+	char buf[MAX_BUF];
+	
+	/* Database control here */
+	
+	snprintf(buf, MAX_BUF, "%s:%d", OK, balance); /* Concatenate OK:new_bal */
+	
+	if(send(sockfd, buf, strlen(buf) + 1, 0) < 0) perror("!Send failed!");
+	update_log(sid, cmd, buf);
 	return(0);
 }
