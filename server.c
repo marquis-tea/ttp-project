@@ -21,8 +21,8 @@ int main() {
 	
 	if(fork() == 0) {
 		printf("Starting logger module...\n");
-		//execl("./logger", "logger", (char *) 0);
-		//perror("!execl() failed!");
+		execl("./logger", "logger", (char *) 0);
+		perror("!execl() failed!");
 		exit(1);
 	}
 	
