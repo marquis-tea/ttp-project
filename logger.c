@@ -3,8 +3,9 @@
 int main() {
 	int bytes_read;
 	char buf[MAX_BUF];
-	int log_fd; // File descriptor for the log file
 	struct q_entry message;
+	
+	int log_fd = open(LOG_FILE, O_WRONLY | O_CREAT | O_APPEND, 0666); // File descriptor for log file
 
 	int pid = fork();
 	
@@ -46,20 +47,10 @@ int main() {
 				} 
 				else {
 					// WRITE TO LOG FILE
-
-					log_fd = open(LOG_FILE, O_WRONLY | O_CREAT | O_APPEND, 0666);
-					if (log_fd == -1) {
-						perror("[Logger] Failed to open log file");
-						// We continue loop even if log fails, to keep server running
-						continue; 
-					}
-
 					if (write(log_fd, buf, bytes_read) == -1) {
 						perror("[Logger] Failed to write to file");
 					}
-
 					write(log_fd, "\n", 1);
-					close(log_fd);
 
 					printf("[Logger] Written to file: %s\n", buf); 
 				}
@@ -101,17 +92,8 @@ int main() {
 			else {
 				// WRITE TO LOG FILE for message queue
 
-				log_fd = open(LOG_FILE, O_WRONLY | O_CREAT | O_APPEND, 0666);
-				if (log_fd == -1) {
-					perror("[Logger Child] Failed to open log file");
-					continue;
-				}
-
-				// Write the message text
 				write(log_fd, message.mtext, msg_len);
 				write(log_fd, "\n", 1); // Add newline
-
-				close(log_fd);
 
 				printf("[Logger Child] Written to file: %s\n", message.mtext);
 			}
@@ -119,6 +101,7 @@ int main() {
 
 		exit(0);
 	}
+	close(log_fd);
 
 	return 0;
 }
