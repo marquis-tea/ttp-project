@@ -1,15 +1,16 @@
 /* server.c */
 #include "common.h"
+#include "database.h"
 
-int server_login(int, char*, char*);
-int server_checkbal(int, char*, char*);
-int server_withdraw(int, char*, char*);
-int server_deposit(int, char*, char*);
+int server_login(int, int, char*, char*);
+int server_checkbal(int, int, char*, char*);
+int server_withdraw(int, int, int, char*, char*);
+int server_deposit(int, int, int, char*, char*);
 int alert_error(char*, int);
 int update_log(char*, char*, char*, int);
 
 int main() {
-	int sockfd, cli_len, nready, max_i, nrecv, fifo_fd, msgid, log_fd, semid;
+	int sockfd, cli_len, nready, max_i, nrecv, fifo_fd, msgid, acc_fd, semid;
 	struct pollfd pollfds[MAX_CLI];
 	char pollid[MAX_CLI][ID_LEN + 1];
 	char buf[MAX_BUF], rsp[MAX_BUF];
@@ -51,8 +52,8 @@ int main() {
 	}
 	
 	/* Opening accounts.txt */
-	log_fd = open("accounts.txt", O_RDONLY);
-	if (log_fd == -1) {
+	acc_fd = open("accounts.txt", O_RDONLY);
+	if (acc_fd == -1) {
 		perror("Error opening file");
 		return 1;
     	}
@@ -154,17 +155,18 @@ int main() {
 						strncpy(pollid[i], incoming_id, ID_LEN);
 						pollid[i][ID_LEN] = '\0'; // Ensure termination
 					
-						if(server_login(curfd, buf, rsp) < 0)
+						if(server_login(curfd, acc_fd, buf, rsp) < 0) {
 							alert_error(pollid[i], msgid);
+						}
 					}
 					else if(strncmp(buf, BAL, strlen(BAL)) == 0)
-						server_checkbal(curfd, buf, rsp);
+						server_checkbal(curfd, acc_fd, buf, rsp);
 						
 					else if(strncmp(buf, WDW, strlen(WDW)) == 0)
-						server_withdraw(curfd, buf, rsp);
+						server_withdraw(curfd, acc_fd, semid, buf, rsp);
 						
 					else if(strncmp(buf, DEP, strlen(DEP)) == 0)
-						server_deposit(curfd, buf, rsp);
+						server_deposit(curfd, acc_fd, semid, buf, rsp);
 					
 					printf("\nReceive message %s from client %s.\n", buf, inet_ntoa(cli_addr.sin_addr));
 					update_log(pollid[i], buf, rsp, fifo_fd);
@@ -177,6 +179,7 @@ int main() {
 	}
 	close(sockfd);
 	close(fifo_fd);
+	close(acc_fd);
 }
 
 /* Server Operations */
@@ -200,6 +203,7 @@ int alert_error(char* sid, int msgid) {
 	struct q_entry alert_msg;
 	int id = atoi(sid);
 	
+	printf("Sending alert!\n");
 	alert_msg.mtype = (long) id;
 	snprintf(alert_msg.mtext, MAX_ALRT, "[ALERT!!!] wrong PIN entered for ID = %s", sid);
 	
@@ -208,10 +212,25 @@ int alert_error(char* sid, int msgid) {
 	return(0);
 }
 
-int server_login(int sockfd, char* cmd, char* rsp) {
-	int valid_id = 0, valid_pin = 0;
+int server_login(int sockfd, int acc_fd, char* cmd, char* rsp) {
+	int result, valid_id = 0, valid_pin = 0;
 	
-	/* Database control here */
+	/* Parse the ID and PIN from the client command */
+	char *tmp = strtok(cmd, ":");
+	char *id = strtok(NULL, ":");
+	char *pin = strtok(NULL, ":");
+	printf("This is the id pin: %s %s", id, pin);
+
+	result = verify_user(acc_fd, id, pin);
+	if(result < 0) {
+		valid_id = 0;
+	} else if(result > 0) {
+		valid_id = 1;
+		valid_pin = 0;
+	} else {
+		valid_id = 1;
+		valid_pin = 1;
+	}
 	
 	if(!valid_id) {
 		if(send(sockfd, ERR_ID, strlen(ERR_ID), 0) < 0) perror("Send failed");
@@ -223,35 +242,46 @@ int server_login(int sockfd, char* cmd, char* rsp) {
 		return(-1);
 	}
 	
-	if(send(sockfd, OK, strlen(OK), 0) < 0) perror("Send failed");
+	if(send(sockfd, OK, strlen(OK) + 1, 0) < 0) perror("Send failed");
 	strcpy(rsp, OK);
 	return(0);
 }
 
-int server_checkbal(int sockfd, char* cmd, char* rsp) {
-	char* sid = "12345678";
-	double bal = 100; // Change this later
+int server_checkbal(int sockfd, int acc_fd, char* cmd, char* rsp) {
+	double bal = 0;
 	char buf[MAX_BUF];
 	
-	/* Database control here */
+	/* Parse the ID from the client command */
+	char *tmp = strtok(cmd, ":");
+	char *id = strtok(NULL, ":");
+	printf("This is the id: %s", id);
+
+	check_balance(acc_fd, id, &bal);
 	
 	snprintf(buf, MAX_BUF, "%s:%f", VAL, bal); /* Concatenate VAL:balance */
 	printf("%s\n", buf);
 	
-	if(send(sockfd, buf, strlen(buf), 0) < 0) perror("Send failed");
+	if(send(sockfd, buf, strlen(buf) + 1, 0) < 0) perror("Send failed");
 	strcpy(rsp, buf);
 	return(0);
 }
 
-int server_withdraw(int sockfd, char* cmd, char* rsp) {
-	char* sid = "12345678";
-	double bal = 100; // Change this later
-	int suff_bal = 0;
+int server_withdraw(int sockfd, int acc_fd, int semid, char* cmd, char* rsp) {
+	double bal = 0;
+	int insuff_bal = 0;
 	char buf[MAX_BUF];
 	
-	/* Database control here */
+	/* Parse the ID and Amount from the client command */
+	char *tmp = strtok(cmd, ":");
+	char *id = strtok(NULL, ":");
+	char *amt = strtok(NULL, ":");
 	
-	if(!suff_bal) {
+	printf("This is the id amt: %s %s", id, amt);
+	bal = atof(amt);
+
+	insuff_bal = withdraw_amount(acc_fd, semid, id, &bal);
+	
+	if(insuff_bal) {
 		if(send(sockfd, ERR_BAL, strlen(ERR_BAL), 0) < 0) perror("Send failed");
 		strcpy(rsp, ERR_BAL);
 		return(-1);
@@ -259,17 +289,24 @@ int server_withdraw(int sockfd, char* cmd, char* rsp) {
 	
 	snprintf(buf, MAX_BUF, "%s:%f", OK, bal); /* Concatenate OK:new_bal */
 	
-	if(send(sockfd, buf, strlen(buf), 0) < 0) perror("Send failed");
+	if(send(sockfd, buf, strlen(buf) + 1, 0) < 0) perror("Send failed");
 	strcpy(rsp, buf);
 	return(0);
 }
 
-int server_deposit(int sockfd, char* cmd, char* rsp) {
-	char* sid = "12345678";
-	double bal = 100; // Change this later
+int server_deposit(int sockfd, int acc_fd, int semid, char* cmd, char* rsp) {
+	double bal = 0;
 	char buf[MAX_BUF];
 	
-	/* Database control here */
+	/* Parse the ID and Amount from the client command */
+	char *tmp = strtok(cmd, ":");
+	char *id = strtok(NULL, ":");
+	char *amt = strtok(NULL, ":");
+	
+	printf("This is the id amt: %s %s", id, amt);
+	bal = atof(amt);
+
+	deposit_amount(acc_fd, semid, id, &bal);
 	
 	snprintf(buf, MAX_BUF, "%s:%f", OK, bal); /* Concatenate OK:new_bal */
 	

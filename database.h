@@ -1,4 +1,20 @@
-#include "common.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <errno.h>
+#include <sys/types.h>
+#include <sys/ipc.h>
+#include <sys/sem.h>
+
+#define MAX_FIELD 50
+#define SEM_KEY 1234
+
+union semun {
+    int val;
+    struct semid_ds *buf;
+    unsigned short *array;
+};
 
 void p(int semid) {
     struct sembuf p_buf;
@@ -37,6 +53,8 @@ int verify_user(int fd, const char *target_id, const char *input_pin) {
     // 2 = Reading PIN
     // 3 = Skipping rest of line
     int state = 0; 
+    
+    lseek(fd, 0, SEEK_SET);
     
     while (read(fd, &ch, 1) > 0) {
         
@@ -114,6 +132,8 @@ int check_balance(int fd, const char *target_id, double* balance_output) {
     // 4 = Skipping rest of line
     int state = 0;
     
+    lseek(fd, 0, SEEK_SET);
+    
     while (read(fd, &ch, 1) > 0) {
         
         // --- STATE 0: Read AccountID ---
@@ -155,7 +175,6 @@ int check_balance(int fd, const char *target_id, double* balance_output) {
                 
                 // Copy balance to output
                 *balance_output = atof(current_field); 
-                close(fd);
                 return 0; // SUCCESS
             } else {
                 if (idx < MAX_FIELD - 1) current_field[idx++] = ch;
@@ -193,6 +212,8 @@ int deposit_amount(int fd, int semid, const char *target_id, double* deposit_amt
     // 3 = Reading Balance
     // 4 = Skipping rest of line
     int state = 0;
+    
+    lseek(fd, 0, SEEK_SET);
     
     while (read(fd, &ch, 1) > 0) {
         
@@ -292,6 +313,8 @@ int withdraw_amount(int fd, int semid, const char *target_id, double* withdraw_a
     // 3 = Reading Balance
     // 4 = Skipping rest of line
     int state = 0;
+    
+    lseek(fd, 0, SEEK_SET);
     
     while (read(fd, &ch, 1) > 0) {
         

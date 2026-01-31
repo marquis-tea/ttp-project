@@ -57,6 +57,10 @@ int main() {
 			} 
 			else if (bytes_read == -1) {
 				perror("[Logger] read failed");
+			} else {
+				printf("[Logger] All writers disconnected. Shutting down to prevent infinite loop.\n");
+				close(fifo_fd);
+				break; // OR exit(0);
 			}
 		}
 
