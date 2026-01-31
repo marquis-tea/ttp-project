@@ -1,137 +1,221 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <string.h>
+/* server.c */
+#include "common.h"
 
-#define ACCOUNTS_FILE "accounts.txt"
-/* Return codes */
-#define OK       0
-#define ERR_ID   1
-#define ERR_PIN  2
-#define ERR_FILE 3
+int server_login(int, char*);
+int server_checkbal(int, char*);
+int server_withdraw(int, char*);
+int server_deposit(int, char*);
+int alert_error(char*);
+int update_log(char*, char*, char*);
 
+int main() {
+	int sockfd, cli_len, nready, max_i, nrecv;
+	struct pollfd pollfds[MAX_CLI];
+	char buf[MAX_BUF];
+	struct sockaddr_in serv_addr, cli_addr;
 
-//login account
-int verify_login(char* id, char* pin)
-{
-    int fd;
-    char buffer[100];
-    char username[50];
-    char account_id[20];
-    char stored_pin[20];
-    char balance[20];
-    int i, field, pos;
-    int bytes_read;
-    int input_id, input_pin;
-    int stored_id_num, stored_pin_num;
-    
-/*    // Validate ID contains only digits 
-    for (i = 0; id[i] != '\0'; i++) {
-        if (id[i] < '0' || id[i] > '9') {
-            printf("Error: ID must contain only digits\n");
-            return ERR_ID;
-        }
-    }
-    
-    /* Validate PIN contains only digits 
-    for (i = 0; pin[i] != '\0'; i++) {
-        if (pin[i] < '0' || pin[i] > '9') {
-            printf("Error: PIN must contain only digits\n");
-            return ERR_PIN;
-        }
-    } */
-    
-    /* Convert input ID and PIN to integers */
-    input_id = atoi(id);
-    input_pin = atoi(pin);
-    
-    /* open() accounts.txt */
-    fd = open(ACCOUNTS_FILE, O_RDONLY);
-    if (fd < 0) {
-        perror("open error");
-        return ERR_FILE;
-    }
-    
-    /* Read and parse file line by line */
-    while ((bytes_read = read(fd, buffer, sizeof(buffer) - 1)) > 0) {
-        buffer[bytes_read] = '\0';
-        
-        /* Parse the line: Username|AccountID|PIN|Balance */
-        field = 0;
-        pos = 0;
-        
-        /* Reset arrays */
-        for (i = 0; i < 50; i++) username[i] = '\0';
-        for (i = 0; i < 20; i++) account_id[i] = '\0';
-        for (i = 0; i < 20; i++) stored_pin[i] = '\0';
-        for (i = 0; i < 20; i++) balance[i] = '\0';
-        
-        /* Parse each field separated by | */
-        for (i = 0; i < bytes_read && buffer[i] != '\n'; i++) {
-            if (buffer[i] == '|') {
-                field++;
-                pos = 0;
-            } else {
-                if (field == 0) {
-                    username[pos++] = buffer[i];
-                } else if (field == 1) {
-                    account_id[pos++] = buffer[i];
-                } else if (field == 2) {
-                    stored_pin[pos++] = buffer[i];
-                } else if (field == 3) {
-                    balance[pos++] = buffer[i];
-                }
-            }
-        }
-        
-        /* Convert stored AccountID and PIN to integers */
-        stored_id_num = atoi(account_id);
-        stored_pin_num = atoi(stored_pin);
-        
-        /* Compare AccountID as integers */
-        if (stored_id_num == input_id) {
-            close(fd);
-            
-            /* Compare PIN as integers */
-            if (stored_pin_num != input_pin) {
-                printf("Error: Invalid PIN\n");
-                return ERR_PIN;
-            }
-            
-            printf("Authentication successful\n");
-            return OK;
-        } else {
-			 printf("Error: Invalid ID\n");
-             return ERR_ID;
+	bzero((char *)&serv_addr, sizeof(serv_addr));
+	serv_addr.sin_family = AF_INET;
+	serv_addr.sin_port = htons(SERV_TCP_PORT);
+	serv_addr.sin_addr.s_addr = inet_addr("127.0.0.1"); /* Change server IP address here */
+	
+	if(fork() == 0) {
+		printf("Starting logger module...\n");
+		execl("./logger", "logger", (char *) 0);
+		perror("!execl() failed!");
+		exit(1);
+	}
+	
+	printf("Creating socket...\n");
+	if((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+		perror("!socket() error!");
+		exit(1);
+	}
+	
+	printf("Binding socket...\n");
+	if((bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr))) < 0) {
+		perror("!bind() error!");
+		exit(1);
+	}
+
+	printf("Listening for connection request...\n");
+	listen(sockfd, 5);
+	
+	pollfds[0].fd = sockfd; /* Set sockfd as the listening fd for accepting new clients */
+	pollfds[0].events = POLLRDNORM;
+	
+	for(int i = 1; i < MAX_CLI; i++) {
+		pollfds[i].fd = -1; /* -1 indicates available entry */
+	}
+	
+	max_i = 0;
+	
+	for(;;) {
+		nready = poll(pollfds, max_i + 1, -1); /* Monitor the pollfds for events to happen such as data to be read */
+		
+		if(pollfds[0].revents & POLLRDNORM) { /* When a client send connection request to sockfd */
+			cli_len = sizeof(cli_addr);
+			int new_sockfd = accept(sockfd, (struct sockaddr*) &cli_addr, &cli_len); /* Accept and create a new sockfd */
+			printf("\nClient %s is now connected.\n", inet_ntoa(cli_addr.sin_addr));
 			
-        
-        /* Move to next line if exists */
-        while (i < bytes_read && buffer[i] != '\n') {
-            i++;
-        }
-        if (i < bytes_read - 1) {
-            lseek(fd, -(bytes_read - i - 1), SEEK_CUR);
-        }
-    }
-    
-    /* Account ID not found */
-    close(fd);
-    printf("Error: Invalid Account ID\n");
-    return ERR_ID;
+			int i;
+			for(i = 1; i < MAX_CLI; i++) {
+				if(pollfds[i].fd < 0) {
+					pollfds[i].fd = new_sockfd;  /* Save the fd into pollfds */
+					pollfds[i].events = POLLRDNORM;
+					break;
+				}
+			}
+				
+			if(i == MAX_CLI) {
+				perror("!Too many clients!");
+				exit(1);
+			}
+			
+			if(i > max_i) max_i = i; /* Update max index */
+			if(--nready <= 0) continue; 
+		}
+		
+		for(int i = 1; i <= max_i; i++) {
+			int curfd = pollfds[i].fd;
+			if(curfd < 0) continue;
+			
+			if(pollfds[i].revents & (POLLRDNORM | POLLERR) ) {
+				switch(nrecv = recv(curfd, buf, MAX_BUF, 0)) {
+					case -1:
+					if(errno == ECONNRESET) {
+						close(curfd);
+						pollfds[i].fd = -1;
+					} else perror("!Read error!");
+					break;
+						
+					case 0:
+					close(curfd);
+					pollfds[i].fd = -1;
+					break;
+					
+					default: 
+					/* Client data handling here */
+					if(nrecv < MAX_BUF) buf[nrecv] = '\0';
+					
+					if(strncmp(buf, "LGOUT", 5) == 0) {
+						printf("Client requested logout.\n");
+						close(curfd);
+						pollfds[i].fd = -1;
+						break;
+					} else if(strncmp(buf, LGN, strlen(LGN)) == 0) server_login(curfd, buf);
+					else if(strncmp(buf, BAL, strlen(BAL)) == 0) server_checkbal(curfd, buf);
+					else if(strncmp(buf, WDW, strlen(WDW)) == 0) server_withdraw(curfd, buf);
+					else if(strncmp(buf, DEP, strlen(DEP)) == 0) server_deposit(curfd, buf);
+					
+					printf("Receive message %s from client %s.\n", buf, inet_ntoa(cli_addr.sin_addr));
+					break;
+				}
+				
+				if(--nready <= 0) break;
+			}
+		}
+	}
+	close(sockfd);
 }
 
-int main(int argc, char *argv[])
-{
-    /* Expect: program AccountID PIN */
-    if (argc != 3) {
-        printf("Usage: %s AccountID PIN\n", argv[0]);
-        return ERR_FILE;
-    }
-    
-    return verify_login(argv[1], argv[2]);
+int update_log(char* sid, char* cmd, char* rsp) {
+	time_t now = time(NULL);
+	char* timestamp = ctime(&now);
+	char buf[MAX_BUF];
+	
+	timestamp[strcspn(timestamp, "\n")] = 0;
+	
+	snprintf(buf, MAX_BUF, "[%s]|%s|%s|%s", timestamp, sid, cmd, rsp);
+	printf("Log entry: %s\n", buf);
+	
+	/* Logger operation here */
+	
+	return(0);
 }
 
+int alert_error(char* sid) {
+	struct q_entry alert_msg;
+	int id = atoi(sid);
+	char* msg = "[ALERT!!!] wrong PIN entered.";
+	
+	alert_msg.mtype = (long) id;
+	strncpy(alert_msg.mtext, msg, strlen(msg) + 1);
+	
+	/* Logger operation here */
+	
+	return(0);
+}
+
+int server_login(int sockfd, char* cmd) {
+	char* sid = "1111"; // Change this later
+	int valid_id = 0, valid_pin = 0;
+	
+	/* Database control here */
+	
+	if(!valid_id) {
+		if(send(sockfd, ERR_ID, strlen(ERR_ID) + 1, 0) < 0) perror("!Send failed!");
+		update_log(sid, cmd, ERR_ID);
+		return(-1);
+	} else if(!valid_pin) {
+		if(send(sockfd, ERR_PIN, strlen(ERR_PIN) + 1, 0) < 0) perror("!Send failed!");
+		update_log(sid, cmd, ERR_PIN);
+		alert_error(sid);
+		return(-1);
+	} 
+	
+	if(send(sockfd, OK, strlen(OK) + 1, 0) < 0) perror("!Send failed!");
+	update_log(sid, cmd, OK);
+	return(0);
+}
+
+int server_checkbal(int sockfd, char* cmd) {
+	char* sid = "1111"; // Change this later
+	int balance = 100; // Change this later
+	char buf[MAX_BUF];
+	
+	/* Database control here */
+	
+	snprintf(buf, MAX_BUF, "%s:%d", VAL, balance); /* Concatenate VAL:balance */
+	
+	if(send(sockfd, buf, strlen(buf) + 1, 0) < 0) perror("!Send failed!");
+	update_log(sid, cmd, buf);
+	return(0);
+}
+
+int server_withdraw(int sockfd, char* cmd) {
+	char* sid = "1111"; // Change this later
+	int balance = 100; // Change this later
+	int suff_bal = 0;
+	char buf[MAX_BUF];
+	
+	/* Database control here */
+	
+	if(!suff_bal) {
+		if(send(sockfd, ERR_BAL, strlen(ERR_BAL) + 1, 0) < 0) perror("!Send failed!");
+		update_log(sid, cmd, ERR_BAL);
+		return(-1);
+	}
+	
+	snprintf(buf, MAX_BUF, "%s:%d", OK, balance); /* Concatenate OK:new_bal */
+	
+	if(send(sockfd, buf, strlen(buf) + 1, 0) < 0) perror("!Send failed!");
+	update_log(sid, cmd, buf);
+	return(0);
+}
+
+int server_deposit(int sockfd, char* cmd) {
+	char* sid = "1111"; // Change this later
+	int balance = 100; // Change this later
+	char buf[MAX_BUF];
+	
+	/* Database control here */
+	
+	snprintf(buf, MAX_BUF, "%s:%d", OK, balance); /* Concatenate OK:new_bal */
+	
+	if(send(sockfd, buf, strlen(buf) + 1, 0) < 0) perror("!Send failed!");
+	update_log(sid, cmd, buf);
+	return(0);
+}
 
 
