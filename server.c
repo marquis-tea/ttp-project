@@ -17,7 +17,7 @@ int main() {
 	bzero((char *)&serv_addr, sizeof(serv_addr));
 	serv_addr.sin_family = AF_INET;
 	serv_addr.sin_port = htons(SERV_TCP_PORT);
-	serv_addr.sin_addr.s_addr = inet_addr("192.168.0.16"); /* Change server IP address here */
+	serv_addr.sin_addr.s_addr = inet_addr("127.0.0.1"); /* Change server IP address here */
 	
 	if(fork() == 0) {
 		printf("Starting logger module...\n");

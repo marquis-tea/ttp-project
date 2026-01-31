@@ -15,7 +15,9 @@
 #include <sys/ipc.h>
 #include <sys/msg.h>
 #include <sys/wait.h>
+#include <signal.h>
 
+#define TIMEOUT 300
 #define SERV_TCP_PORT 25000
 #define MAX_CLI 10
 #define MAX_BUF 256
