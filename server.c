@@ -1,47 +1,68 @@
 /* server.c */
 #include "common.h"
 
-int server_login(int, char*);
-int server_checkbal(int, char*);
-int server_withdraw(int, char*);
-int server_deposit(int, char*);
-int alert_error(char*);
-int update_log(char*, char*, char*);
+int server_login(int, char*, char*);
+int server_checkbal(int, char*, char*);
+int server_withdraw(int, char*, char*);
+int server_deposit(int, char*, char*);
+int alert_error(char*, int);
+int update_log(char*, char*, char*, int);
 
 int main() {
-	int sockfd, cli_len, nready, max_i, nrecv;
+	int sockfd, cli_len, nready, max_i, nrecv, fifo_fd, msgid;
 	struct pollfd pollfds[MAX_CLI];
-	char buf[MAX_BUF];
+	char pollid[MAX_CLI][ID_LEN + 1];
+	char buf[MAX_BUF], rsp[MAX_BUF];
 	struct sockaddr_in serv_addr, cli_addr;
-
+	
+	/* Setting up the server-side socket */
 	bzero((char *)&serv_addr, sizeof(serv_addr));
 	serv_addr.sin_family = AF_INET;
 	serv_addr.sin_port = htons(SERV_TCP_PORT);
-	serv_addr.sin_addr.s_addr = inet_addr("127.0.0.1"); /* Change server IP address here */
+	serv_addr.sin_addr.s_addr = inet_addr("192.168.0.16"); /* Change server IP address here */
 	
 	if(fork() == 0) {
 		printf("Starting logger module...\n");
 		execl("./logger", "logger", (char *) 0);
-		perror("!execl() failed!");
+		perror("execl() failed");
 		exit(1);
 	}
+	sleep(1);
 	
 	printf("Creating socket...\n");
 	if((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-		perror("!socket() error!");
+		perror("socket() error");
+		exit(1);
+	}
+	
+	/* Enable reusing address for the socket */
+	int opt = 1;
+	if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+		perror("setsockopt() failed");
+		close(sockfd);
 		exit(1);
 	}
 	
 	printf("Binding socket...\n");
-	if((bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr))) < 0) {
-		perror("!bind() error!");
+	if(bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
+		perror("bind() error");
+		close(sockfd);
 		exit(1);
 	}
-
+	
+	/* Connecting to FIFO pipe */
+	if((fifo_fd = open(FIFO_NAME, O_WRONLY | O_NONBLOCK)) < 0) perror("Open FIFO failed");
+	else printf("Connected to FIFO pipe...\n");
+	
+	/* Connecting to Message Queue */
+	if((msgid = msgget(MSG_KEY, 0666)) < 0) perror("Get message queue failed");
+	else printf("Connected to message queue...\n");
+	
 	printf("Listening for connection request...\n");
 	listen(sockfd, 5);
 	
-	pollfds[0].fd = sockfd; /* Set sockfd as the listening fd for accepting new clients */
+	/* Set sockfd as the listening fd for accepting new clients */
+	pollfds[0].fd = sockfd; 
 	pollfds[0].events = POLLRDNORM;
 	
 	for(int i = 1; i < MAX_CLI; i++) {
@@ -68,7 +89,7 @@ int main() {
 			}
 				
 			if(i == MAX_CLI) {
-				perror("!Too many clients!");
+				perror("Too many clients");
 				exit(1);
 			}
 			
@@ -82,33 +103,54 @@ int main() {
 			
 			if(pollfds[i].revents & (POLLRDNORM | POLLERR) ) {
 				switch(nrecv = recv(curfd, buf, MAX_BUF, 0)) {
+					
+					/* When error received from recv() */
 					case -1:
 					if(errno == ECONNRESET) {
 						close(curfd);
 						pollfds[i].fd = -1;
-					} else perror("!Read error!");
+					} else perror("Read error");
 					break;
-						
+					
+					/* If client don't send any data */
 					case 0:
+					
 					close(curfd);
 					pollfds[i].fd = -1;
 					break;
 					
-					default: 
+					
 					/* Client data handling here */
+					default: 
+					
 					if(nrecv < MAX_BUF) buf[nrecv] = '\0';
 					
-					if(strncmp(buf, "LGOUT", 5) == 0) {
+					if(strncmp(buf, LGOUT, strlen(LGOUT)) == 0) {
 						printf("Client requested logout.\n");
 						close(curfd);
 						pollfds[i].fd = -1;
 						break;
-					} else if(strncmp(buf, LGN, strlen(LGN)) == 0) server_login(curfd, buf);
-					else if(strncmp(buf, BAL, strlen(BAL)) == 0) server_checkbal(curfd, buf);
-					else if(strncmp(buf, WDW, strlen(WDW)) == 0) server_withdraw(curfd, buf);
-					else if(strncmp(buf, DEP, strlen(DEP)) == 0) server_deposit(curfd, buf);
+					} else if(strncmp(buf, LGN, strlen(LGN)) == 0) {
+						char *incoming_id = strchr(buf, ':') + 1;
+	            
+						// Copy the account id into the pollid[][] at the current index 'i'
+						strncpy(pollid[i], incoming_id, ID_LEN);
+						pollid[i][ID_LEN] = '\0'; // Ensure termination
 					
-					printf("Receive message %s from client %s.\n", buf, inet_ntoa(cli_addr.sin_addr));
+						if(server_login(curfd, buf, rsp) < 0)
+							alert_error(pollid[i], msgid);
+					}
+					else if(strncmp(buf, BAL, strlen(BAL)) == 0)
+						server_checkbal(curfd, buf, rsp);
+						
+					else if(strncmp(buf, WDW, strlen(WDW)) == 0)
+						server_withdraw(curfd, buf, rsp);
+						
+					else if(strncmp(buf, DEP, strlen(DEP)) == 0)
+						server_deposit(curfd, buf, rsp);
+					
+					printf("\nReceive message %s from client %s.\n", buf, inet_ntoa(cli_addr.sin_addr));
+					update_log(pollid[i], buf, rsp, fifo_fd);
 					break;
 				}
 				
@@ -117,103 +159,104 @@ int main() {
 		}
 	}
 	close(sockfd);
+	close(fifo_fd);
 }
 
-int update_log(char* sid, char* cmd, char* rsp) {
+/* Server Operations */
+
+int update_log(char* sid, char* cmd, char* rsp, int fifo_fd) {
 	time_t now = time(NULL);
 	char* timestamp = ctime(&now);
 	char buf[MAX_BUF];
 	
 	timestamp[strcspn(timestamp, "\n")] = 0;
 	
-	snprintf(buf, MAX_BUF, "[%s]|%s|%s|%s", timestamp, sid, cmd, rsp);
+	snprintf(buf, MAX_BUF, "[%s]" FILE_DELIM "%s" FILE_DELIM "%s" FILE_DELIM "%s", timestamp, sid, cmd, rsp);
 	printf("Log entry: %s\n", buf);
 	
-	/* Logger operation here */
+	if(write(fifo_fd, buf, strlen(buf)) < 0) perror("Write FIFO failed");
 	
 	return(0);
 }
 
-int alert_error(char* sid) {
+int alert_error(char* sid, int msgid) {
 	struct q_entry alert_msg;
 	int id = atoi(sid);
-	char* msg = "[ALERT!!!] wrong PIN entered.";
 	
 	alert_msg.mtype = (long) id;
-	strncpy(alert_msg.mtext, msg, strlen(msg) + 1);
+	snprintf(alert_msg.mtext, MAX_ALRT, "[ALERT!!!] wrong PIN entered for ID = %s", sid);
 	
-	/* Logger operation here */
+	if(msgsnd(msgid, &alert_msg, strlen(alert_msg.mtext) + 1, 0) < 0) perror("msgsnd() failed.");
 	
 	return(0);
 }
 
-int server_login(int sockfd, char* cmd) {
-	char* sid = "1111"; // Change this later
+int server_login(int sockfd, char* cmd, char* rsp) {
 	int valid_id = 0, valid_pin = 0;
 	
 	/* Database control here */
 	
 	if(!valid_id) {
-		if(send(sockfd, ERR_ID, strlen(ERR_ID) + 1, 0) < 0) perror("!Send failed!");
-		update_log(sid, cmd, ERR_ID);
-		return(-1);
+		if(send(sockfd, ERR_ID, strlen(ERR_ID), 0) < 0) perror("Send failed");
+		strcpy(rsp, ERR_ID);
+		return(1);
 	} else if(!valid_pin) {
-		if(send(sockfd, ERR_PIN, strlen(ERR_PIN) + 1, 0) < 0) perror("!Send failed!");
-		update_log(sid, cmd, ERR_PIN);
-		alert_error(sid);
+		if(send(sockfd, ERR_PIN, strlen(ERR_PIN), 0) < 0) perror("Send failed");
+		strcpy(rsp, ERR_PIN);
 		return(-1);
-	} 
+	}
 	
-	if(send(sockfd, OK, strlen(OK) + 1, 0) < 0) perror("!Send failed!");
-	update_log(sid, cmd, OK);
+	if(send(sockfd, OK, strlen(OK), 0) < 0) perror("Send failed");
+	strcpy(rsp, OK);
 	return(0);
 }
 
-int server_checkbal(int sockfd, char* cmd) {
-	char* sid = "1111"; // Change this later
-	int balance = 100; // Change this later
+int server_checkbal(int sockfd, char* cmd, char* rsp) {
+	char* sid = "12345678";
+	double bal = 100; // Change this later
 	char buf[MAX_BUF];
 	
 	/* Database control here */
 	
-	snprintf(buf, MAX_BUF, "%s:%d", VAL, balance); /* Concatenate VAL:balance */
+	snprintf(buf, MAX_BUF, "%s" MSG_DELIM "%f", VAL, bal); /* Concatenate VAL:balance */
+	printf("%s\n", buf);
 	
-	if(send(sockfd, buf, strlen(buf) + 1, 0) < 0) perror("!Send failed!");
-	update_log(sid, cmd, buf);
+	if(send(sockfd, buf, strlen(buf), 0) < 0) perror("Send failed");
+	strcpy(rsp, buf);
 	return(0);
 }
 
-int server_withdraw(int sockfd, char* cmd) {
-	char* sid = "1111"; // Change this later
-	int balance = 100; // Change this later
+int server_withdraw(int sockfd, char* cmd, char* rsp) {
+	char* sid = "12345678";
+	double bal = 100; // Change this later
 	int suff_bal = 0;
 	char buf[MAX_BUF];
 	
 	/* Database control here */
 	
 	if(!suff_bal) {
-		if(send(sockfd, ERR_BAL, strlen(ERR_BAL) + 1, 0) < 0) perror("!Send failed!");
-		update_log(sid, cmd, ERR_BAL);
+		if(send(sockfd, ERR_BAL, strlen(ERR_BAL), 0) < 0) perror("Send failed");
+		strcpy(rsp, ERR_BAL);
 		return(-1);
 	}
 	
-	snprintf(buf, MAX_BUF, "%s:%d", OK, balance); /* Concatenate OK:new_bal */
+	snprintf(buf, MAX_BUF, "%s" MSG_DELIM "%f", OK, bal); /* Concatenate OK:new_bal */
 	
-	if(send(sockfd, buf, strlen(buf) + 1, 0) < 0) perror("!Send failed!");
-	update_log(sid, cmd, buf);
+	if(send(sockfd, buf, strlen(buf), 0) < 0) perror("Send failed");
+	strcpy(rsp, buf);
 	return(0);
 }
 
-int server_deposit(int sockfd, char* cmd) {
-	char* sid = "1111"; // Change this later
-	int balance = 100; // Change this later
+int server_deposit(int sockfd, char* cmd, char* rsp) {
+	char* sid = "12345678";
+	double bal = 100; // Change this later
 	char buf[MAX_BUF];
 	
 	/* Database control here */
 	
-	snprintf(buf, MAX_BUF, "%s:%d", OK, balance); /* Concatenate OK:new_bal */
+	snprintf(buf, MAX_BUF, "%s" MSG_DELIM "%f", OK, bal); /* Concatenate OK:new_bal */
 	
-	if(send(sockfd, buf, strlen(buf) + 1, 0) < 0) perror("!Send failed!");
-	update_log(sid, cmd, buf);
+	if(send(sockfd, buf, strlen(buf) + 1, 0) < 0) perror("Send failed");
+	strcpy(rsp, buf);
 	return(0);
 }
