@@ -1,15 +1,6 @@
-//login
-#include <stdio.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <string.h>
-#include <stdlib.h>
-#include <sys/sem.h>
-#include <sys/ipc.h>
-#define MAX_FIELD 50
-#define SEM_KEY 1234
+#include "common.h"
 
-bool verify_user(const char *target_id, const char *input_pin) {
+int verify_user(const char *target_id, const char *input_pin) {
     int fd = open("accounts.txt", O_RDONLY);
     if (fd == -1) {
         perror("Error opening file");
@@ -88,7 +79,7 @@ bool verify_user(const char *target_id, const char *input_pin) {
     }
     
     close(fd);
-    return false; // User not found
+    return 1; // User not found
 }
 
 //==================================================================================

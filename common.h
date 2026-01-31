@@ -16,12 +16,16 @@
 #include <sys/msg.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <sys/sem.h>
 
 #define TIMEOUT 300
 #define SERV_TCP_PORT 25000
 #define MAX_CLI 10
 #define MAX_BUF 256
 #define MAX_ALRT 50
+
+#define MAX_FIELD 50
+#define SEM_KEY 1234
 
 /* Commands and Responses */
 #define ERR_PIN "ERR_PIN"
