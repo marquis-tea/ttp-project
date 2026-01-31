@@ -17,7 +17,7 @@
 #include <sys/wait.h>
 #include <signal.h>
 
-#define TIMEOUT 300
+/* Server Config */
 #define SERV_TCP_PORT 25000
 #define MAX_CLI 10
 #define MAX_BUF 256
@@ -34,8 +34,15 @@
 #define WDW "WDW"
 #define DEP "DEP"
 #define LGOUT "LGOUT"
-#define delim '|'
+#define FILE_DELIM "|"
+#define MSG_DELIM ":"
 
+/* Client Config */
+#define TIMEOUT 300
+#define ID_LEN 8
+#define PIN_LEN 6
+
+/* Logger Config */
 #define FIFO_NAME "atm_fifo"
 #define LOG_FILE "log.txt"
 #define MSG_KEY 1234
