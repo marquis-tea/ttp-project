@@ -12,6 +12,8 @@
 #define ERR_PIN  2
 #define ERR_FILE 3
 
+
+//login account
 int verify_login(char* id, char* pin)
 {
     int fd;
@@ -130,3 +132,6 @@ int main(int argc, char *argv[])
     
     return verify_login(argv[1], argv[2]);
 }
+
+
+
