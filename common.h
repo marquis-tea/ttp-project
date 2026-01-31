@@ -56,3 +56,9 @@ struct q_entry {
 	long mtype;
 	char mtext[MAX_ALRT];
 };
+
+union semun {
+    int val;
+    struct semid_ds *buf;
+    unsigned short *array;
+};

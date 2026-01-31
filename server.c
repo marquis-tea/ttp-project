@@ -9,7 +9,7 @@ int alert_error(char*, int);
 int update_log(char*, char*, char*, int);
 
 int main() {
-	int sockfd, cli_len, nready, max_i, nrecv, fifo_fd, msgid;
+	int sockfd, cli_len, nready, max_i, nrecv, fifo_fd, msgid, log_fd, semid;
 	struct pollfd pollfds[MAX_CLI];
 	char pollid[MAX_CLI][ID_LEN + 1];
 	char buf[MAX_BUF], rsp[MAX_BUF];
@@ -50,6 +50,23 @@ int main() {
 		exit(1);
 	}
 	
+	/* Opening accounts.txt */
+	log_fd = open("accounts.txt", O_RDONLY);
+	if (log_fd == -1) {
+		perror("Error opening file");
+		return 1;
+    	}
+    	
+    	/* Creating Semaphore */
+	semid = semget(SEM_KEY, 1, IPC_CREAT | 0666);
+	if (semid == -1) perror("Error creating semaphore");
+	else printf("Created semaphore...\n");
+	
+	// Initialize semaphore to 1 (unlocked)
+	union semun arg;
+	arg.val = 1;
+	semctl(semid, 0, SETVAL, arg);
+    
 	/* Connecting to FIFO pipe */
 	if((fifo_fd = open(FIFO_NAME, O_WRONLY | O_NONBLOCK)) < 0) perror("Open FIFO failed");
 	else printf("Connected to FIFO pipe...\n");
@@ -171,10 +188,10 @@ int update_log(char* sid, char* cmd, char* rsp, int fifo_fd) {
 	
 	timestamp[strcspn(timestamp, "\n")] = 0;
 	
-	snprintf(buf, MAX_BUF, "[%s]" FILE_DELIM "%s" FILE_DELIM "%s" FILE_DELIM "%s", timestamp, sid, cmd, rsp);
+	snprintf(buf, MAX_BUF, "[%s]|%s|%s|%s", timestamp, sid, cmd, rsp);
 	printf("Log entry: %s\n", buf);
 	
-	if(write(fifo_fd, buf, strlen(buf)) < 0) perror("Write FIFO failed");
+	if(write(fifo_fd, buf, strlen(buf) + 1) < 0) perror("Write FIFO failed");
 	
 	return(0);
 }
@@ -218,7 +235,7 @@ int server_checkbal(int sockfd, char* cmd, char* rsp) {
 	
 	/* Database control here */
 	
-	snprintf(buf, MAX_BUF, "%s" MSG_DELIM "%f", VAL, bal); /* Concatenate VAL:balance */
+	snprintf(buf, MAX_BUF, "%s:%f", VAL, bal); /* Concatenate VAL:balance */
 	printf("%s\n", buf);
 	
 	if(send(sockfd, buf, strlen(buf), 0) < 0) perror("Send failed");
@@ -240,7 +257,7 @@ int server_withdraw(int sockfd, char* cmd, char* rsp) {
 		return(-1);
 	}
 	
-	snprintf(buf, MAX_BUF, "%s" MSG_DELIM "%f", OK, bal); /* Concatenate OK:new_bal */
+	snprintf(buf, MAX_BUF, "%s:%f", OK, bal); /* Concatenate OK:new_bal */
 	
 	if(send(sockfd, buf, strlen(buf), 0) < 0) perror("Send failed");
 	strcpy(rsp, buf);
@@ -254,7 +271,7 @@ int server_deposit(int sockfd, char* cmd, char* rsp) {
 	
 	/* Database control here */
 	
-	snprintf(buf, MAX_BUF, "%s" MSG_DELIM "%f", OK, bal); /* Concatenate OK:new_bal */
+	snprintf(buf, MAX_BUF, "%s:%f", OK, bal); /* Concatenate OK:new_bal */
 	
 	if(send(sockfd, buf, strlen(buf) + 1, 0) < 0) perror("Send failed");
 	strcpy(rsp, buf);
