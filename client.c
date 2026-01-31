@@ -1,10 +1,4 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <signal.h>
-#include <sys/socket.h>
-#include <arpa/inet.h>
+#include "common.h"
 
 // ANSI Color Codes
 #define BOLD_BLUE  "\033[1;34m"
@@ -13,9 +7,6 @@
 #define RESET      "\033[0m"
 #define BOLD_RED   "\033[1;31m"
 #define BOLD_GREEN "\033[1;32m"
-
-#define PORT 25000
-#define TIMEOUT 300 
 
 int sock_fd = 0;
 
@@ -50,55 +41,54 @@ int main() {
     struct sockaddr_in serv_addr;
     int authenticated = 0;
 
-    // --- MAIN LOOP: Everything restarts here on failure ---
+    // --- MAIN LOGIN LOOP ---
     while (!authenticated) {
         system("clear");
         printf("%s====================================================%s\n", BOLD_BLUE, RESET);
         printf("%s           WELCOME TO THE SIXSEVEN BANK ATM         %s\n", BOLD_WHITE, RESET);
         printf("%s====================================================%s\n\n", BOLD_BLUE, RESET);
 
-        // 1. Get ID (Exactly 8 digits)
         printf("%s» ACCOUNT ID: %s", BOLD_CYAN, RESET);
         if (scanf("%63s", temp_id) <= 0) exit(0);
         clear_stdin();
-
         if (strlen(temp_id) != 8) {
-            printf("%s[X] ERROR: INVALID ID.. TRY AGAIN...%s\n", BOLD_RED, RESET);
-            sleep(1);
-            continue; // Jumps back to the Welcome screen
+            printf("%s[X] ERROR: INVALID ID . TRY AGAIN...%s\n", BOLD_RED, RESET);
+            sleep(1); continue; 
         }
         strcpy(final_id, temp_id);
 
-        // 2. Get PIN (Exactly 6 digits)
         printf("%s» ACCESS PIN: %s", BOLD_CYAN, RESET);
         if (scanf("%63s", temp_pin) <= 0) exit(0);
         clear_stdin();
-
         if (strlen(temp_pin) != 6) {
-            printf("%s[X] ERROR: INVALID PIN.. TRY AGAIN...%s\n", BOLD_RED, RESET);
-            sleep(1);
-            continue; // Jumps back to the Welcome screen
+            printf("%s[X] ERROR: INVALID PIN . TRY AGAIN...%s\n", BOLD_RED, RESET);
+            sleep(1); continue; 
         }
         strcpy(final_pin, temp_pin);
 
-        // 3. Connect and Verify
         show_loading("\nVerifying credentials");
         
         sock_fd = socket(AF_INET, SOCK_STREAM, 0);
+        
+        // --- CHANGED TO BZERO ---
         bzero((char *)&serv_addr, sizeof(serv_addr));
+        
         serv_addr.sin_family = AF_INET;
-        serv_addr.sin_port = htons(PORT);
+        serv_addr.sin_port = htons(SERV_TCP_PORT);
         serv_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
 
         if (connect(sock_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
             printf("%s[!] SYSTEM OFFLINE. Try again later.%s\n", BOLD_RED, RESET);
-            return -1;
+            close(sock_fd);
+            sleep(2);
+            continue; 
         }
 
         sprintf(send_buf, "LGN:%s:%s", final_id, final_pin);
         send(sock_fd, send_buf, strlen(send_buf), 0);
 
-        memset(recv_buf, 0, sizeof(recv_buf));
+        // --- CHANGED TO BZERO ---
+        bzero(recv_buf, sizeof(recv_buf));
         recv(sock_fd, recv_buf, sizeof(recv_buf), 0);
 
         if (strcmp(recv_buf, "OK") == 0) {
@@ -106,42 +96,76 @@ int main() {
             printf("%s[✔] Identity Verified!%s\n", BOLD_GREEN, RESET);
             sleep(1);
         } else {
-            // IF PIN OR ID IS WRONG:
-            printf("%s[X] LOGIN FAILED: %s. RESTARTING LOGIN...%s\n", BOLD_RED, recv_buf, RESET);
+            printf("%s[X] LOGIN FAILED: %s. RESTARTING...%s\n", BOLD_RED, recv_buf, RESET);
             close(sock_fd);
             sleep(2); 
-            // Loop naturally restarts to prompt for ID again
         }
     }
 
-    // --- STEP 4: AUTHENTICATED SESSION ---
     signal(SIGALRM, handle_inactivity);
     alarm(TIMEOUT);
 
     int choice;
+    float amount;
     while (1) {
         system("clear");
         printf("%s====================================================%s\n", BOLD_BLUE, RESET);
         printf("%s                  MAIN TRANSACTION MENU             %s\n", BOLD_WHITE, RESET);
         printf("%s====================================================%s\n", BOLD_BLUE, RESET);
-        printf("%s 1.%s Check Balance\n%s 4.%s Secure Logout\n", BOLD_CYAN, RESET, BOLD_CYAN, RESET);
+        printf("%s 1.%s Check Balance\n%s 2.%s Deposit Funds\n%s 3.%s Withdraw Cash\n%s 4.%s Secure Logout\n", 
+               BOLD_CYAN, RESET, BOLD_CYAN, RESET, BOLD_CYAN, RESET, BOLD_CYAN, RESET);
         printf("----------------------------------------------------\nSelection: ");
         
         if (scanf("%d", &choice) <= 0) break;
         clear_stdin();
         alarm(TIMEOUT); 
 
-        if (choice == 1) {
+        if (choice == 1) { // --- CHECK BALANCE ---
             send(sock_fd, "BAL", 3, 0);
-            memset(recv_buf, 0, sizeof(recv_buf));
+            bzero(recv_buf, sizeof(recv_buf));
             recv(sock_fd, recv_buf, sizeof(recv_buf), 0);
-            printf("\n%s>> BALANCE: $%s <<%s\n", BOLD_GREEN, recv_buf, RESET);
-            printf("\nPress Enter to return to menu...");
+            printf("\n%s>> BALANCE: RM%s <<%s\n", BOLD_GREEN, recv_buf, RESET);
+            printf("\nPress Enter to return...");
             getchar();
         } 
-        else if (choice == 4) {
+        else if (choice == 2) { // --- DEPOSIT ---
+            printf("\n%sEnter DEPOSIT amount: RM%s", BOLD_CYAN, RESET);
+            scanf("%f", &amount);
+            clear_stdin();
+            
+            show_loading("Processing Deposit");
+            sprintf(send_buf, "DEP:%f", amount); 
+            send(sock_fd, send_buf, strlen(send_buf), 0);
+
+            bzero(recv_buf, sizeof(recv_buf));
+            recv(sock_fd, recv_buf, sizeof(recv_buf), 0);
+            printf("%s[✔] %s%s\n", BOLD_GREEN, recv_buf, RESET);
+            printf("\nPress Enter to continue...");
+            getchar();
+        }
+        else if (choice == 3) { // --- WITHDRAWAL ---
+            printf("\n%sEnter WITHDRAWAL amount: RM%s", BOLD_CYAN, RESET);
+            scanf("%f", &amount);
+            clear_stdin();
+
+            show_loading("Processing Withdrawal");
+            sprintf(send_buf, "WDW:%f", amount);
+            send(sock_fd, send_buf, strlen(send_buf), 0);
+
+            bzero(recv_buf, sizeof(recv_buf));
+            recv(sock_fd, recv_buf, sizeof(recv_buf), 0);
+
+            if (strncmp(recv_buf, "OK", 2) == 0) {
+                printf("%s[✔] %s%s\n", BOLD_GREEN, recv_buf, RESET);
+            } else {
+                printf("%s[X] ERROR: %s%s\n", BOLD_RED, recv_buf, RESET);
+            }
+            printf("\nPress Enter to continue...");
+            getchar();
+        }
+        else if (choice == 4) { // --- LOGOUT ---
             send(sock_fd, "LGOUT", 5, 0);
-            printf("\n%sLogging out securely... Goodbye!%s\n", BOLD_CYAN, RESET);
+            printf("\n%sLogging out... THANK YOU!!%s\n", BOLD_CYAN, RESET);
             sleep(1);
             break;
         }
