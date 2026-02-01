@@ -91,7 +91,7 @@ int main() {
 		}
 		strcpy(pin, temp_pin);
 		
-		/* Send LGN to client to validate ID and PIN */
+		/* Send LGN to server to validate ID and PIN */
 		snprintf(send_buf, MAX_BUF, LGN ":%s:%s", id, pin);
 		send(sockfd, send_buf, strlen(send_buf) + 1, 0);
 		
@@ -106,7 +106,6 @@ int main() {
 		    sleep(1);
 		} else {
 		    printf("%s[X] LOGIN FAILED: %s. RESTARTING...%s\n", BOLD_RED, recv_buf, RESET);
-		    close(sockfd);
 		    sleep(2); 
 		}
 	}
