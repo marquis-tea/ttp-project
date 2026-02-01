@@ -13,6 +13,11 @@
 #define USR_FIELD 20
 #define PIN_FIELD 6
 #define BAL_FIELD 15
+#define ROW_SIZE 54
+
+/* The offsets of fields in a row */
+#define PIN_OFFSET (ID_FIELD + 1 + USR_FIELD + 1) // 8 + 1 + 20 + 1 = 30
+#define BAL_OFFSET (PIN_OFFSET + PIN_FIELD + 1)    // 30 + 6 + 1 = 37
 
 union semun {
     int val;
@@ -46,372 +51,129 @@ void v(int semid) {
     return;
 }
 
-int verify_user(int fd, const char *target_id, const char *input_pin) {
-    char ch;
-    char current_field[MAX_FIELD];
-    int idx = 0;
-    
-    // Flags to track where we are in the line
-    // 0 = Reading AccountID
-    // 1 = Skipping Username
-    // 2 = Reading PIN
-    // 3 = Skipping rest of line
-    int state = 0; 
-    
+int search_row(int fd, const char* target_id) {
+    char cur_id[ID_FIELD + 1];
+    int row_index = 0;
     lseek(fd, 0, SEEK_SET);
-    
-    while (read(fd, &ch, 1) > 0) {
+
+    while(read(fd, cur_id, ID_FIELD) == ID_FIELD) {
+        cur_id[ID_FIELD] = '\0'; // Null-terminate for strcmp
         
-        // --- STATE 0: Read AccountID ---
-        if (state == 0) {
-            if (ch == '|') {
-                current_field[idx] = '\0';
-                idx = 0; // Reset buffer index
-                
-                // Check if this is the correct user
-                if (strcmp(current_field, target_id) == 0) {
-                    state = 1; // If ID matches, then go skip username and check PIN
-                } else {
-                    state = 3; // If ID mismatch, skip the whole line
-                }
-	    } else if(ch == '\n' || ch == '\r') {
-	    	idx = 0;
-            } else {
-                if (idx < MAX_FIELD - 1) current_field[idx++] = ch;
-            }
-        }
+        /* If ID is found immediately return */
+        if (strcmp(cur_id, target_id) == 0) return row_index;
+        row_index++;
         
-        // --- STATE 1: Skip Username ---
-        else if (state == 1) {
-            if (ch == '|') {
-                idx = 0;
-                state = 2; 
-            }
-        }
-        
-        // --- STATE 2: Read PIN ---
-        else if (state == 2) {
-            if (ch == '|') {
-                current_field[idx] = '\0';
-                
-                // We found the ID *and* the PIN, thus return
-                if (strcmp(current_field, input_pin) == 0) {
-                    return 0; // SUCCESS
-                } else {
-                    return 1; // Wrong PIN
-                }
-            } else {
-                if (idx < MAX_FIELD - 1) current_field[idx++] = ch;
-            }
-        }
-        
-        // --- STATE 3: Skip Rest of Line ---
-        else if (state == 3) {
-            if (ch == '\n') {
-                // End of row reached. Reset to start looking for next ID.
-                state = 0;
-                idx = 0;
-            }
-        }
+        /* Otherwise, jump to next row */
+        if (lseek(fd, (off_t)row_index * ROW_SIZE, SEEK_SET) == (off_t)-1) break;
     }
-    
-    // The ID was not found
-    return -1;
-    
-    /*
-    return 0 = success
-    return -1 = invalid id
-    return 1 = invalid pin
-    */
+
+    return -1; // If ID is not found
+}
+
+int verify_user(int fd, const char *target_id, const char *input_pin) {
+	int row = search_row(fd, target_id);
+	if (row == -1) return -1; // Return -1 immediately if ID is not found
+
+	char stored_pin[PIN_FIELD + 1];
+	/* Jump to the PIN field of the row with ID */
+	lseek(fd, (off_t)row * ROW_SIZE + PIN_OFFSET, SEEK_SET);
+
+	if (read(fd, stored_pin, PIN_FIELD) != PIN_FIELD) return -1;
+	stored_pin[PIN_FIELD] = '\0';
+	
+	/* Return 0 if PIN is valid, 1 if invalid */
+	return (strcmp(stored_pin, input_pin) == 0) ? 0 : 1;
+	
+	/*
+	return 0 = success
+	return -1 = invalid id
+	return 1 = invalid pin
+	*/
 }
 
 int check_balance(int fd, const char *target_id, double* balance_output) {
-	char ch;
-	char current_field[MAX_FIELD];
-	int idx = 0;
+    int row = search_row(fd, target_id);
+    if (row == -1) return -1;
 
-	// Flags to track where we are in the line
-	// 0 = Reading AccountID
-	// 1 = Skipping Username
-	// 2 = Skipping PIN
-	// 3 = Reading Balance
-	// 4 = Skipping rest of line
-	int state = 0;
-
-	lseek(fd, 0, SEEK_SET);
+    char bal_str[BAL_FIELD + 1];
+    /* Jump to the balance field of the row */
+    lseek(fd, (off_t)row * ROW_SIZE + BAL_OFFSET, SEEK_SET);
     
-	while (read(fd, &ch, 1) > 0) {
+    if (read(fd, bal_str, BAL_FIELD) != BAL_FIELD) return 1;
+    bal_str[BAL_FIELD] = '\0';
 
-	// --- STATE 0: Read AccountID ---
-	if (state == 0) {
-	    if (ch == '|') {
-		current_field[idx] = '\0'; // Null-terminate ID
-		idx = 0; // Reset buffer index
-		
-		// Check if this is the correct user
-		if (strcmp(current_field, target_id) == 0) {
-		    state = 1; // ID Match: Move to skip Username
-		} else {
-		    state = 4; // ID Mismatch: Skip to next line
-		}
-	    } else if(ch == '\n' || ch == '\r') {
-	    	idx = 0;
-	    } else {
-		if (idx < MAX_FIELD - 1) current_field[idx++] = ch;
-	    }
-	}
-
-	// --- STATE 1: Skip Username ---
-	else if (state == 1) {
-	    if (ch == '|') {
-		state = 2;
-	    }
-	}
-
-	// --- STATE 2: Skip PIN ---
-	else if (state == 2) {
-	    if (ch == '|') {
-		idx = 0;
-		state = 3;
-	    }
-	}
-
-	// --- STATE 3: Read Balance ---
-	else if (state == 3) {
-	    if (ch == '|') {
-		current_field[idx] = '\0'; // Null-terminate Balance
-		
-		// Copy balance to output
-		*balance_output = atof(current_field); 
-		return 0; // SUCCESS
-	    } else {
-		if (idx < MAX_FIELD - 1) current_field[idx++] = ch;
-	    }
-	}
-
-	// --- STATE 4: Skip Rest of Line ---
-	else if (state == 4) {
-	    if (ch == '\n') {
-		// End of row reached. Reset to start looking for next ID.
-		state = 0;
-		idx = 0;
-	    }
-	}
-	}
-
-    return 1; // Account not found
+    *balance_output = atof(bal_str);
+    return 0;
 }
 
 int deposit_amount(int fd, int semid, const char *target_id, double* deposit_amt) {
+    p(semid);
+    int row = search_row(fd, target_id);
+    if (row == -1) {
+    	v(semid); 
+    	return -1; /* If row not found, unlock semaphore and return -1 */
+    }
+
+    char bal_str[BAL_FIELD + 1];
+    off_t bal_pos = (off_t)row * ROW_SIZE + BAL_OFFSET;
+    lseek(fd, bal_pos, SEEK_SET);
     
-	// Lock the file using p()
-	p(semid);
+    if (read(fd, bal_str, BAL_FIELD) != BAL_FIELD) {
+    	v(semid); 
+    	return -1;
+    }
+    
+    bal_str[BAL_FIELD] = '\0';
 
-	char ch;
-	char current_field[MAX_FIELD];
-	int idx = 0;
-	off_t balance_position = 0;
-	double old_balance, new_balance;
+    /* Update back to server the new_bal */
+    double new_balance = atof(bal_str) + *deposit_amt;
+    *deposit_amt = new_balance;
 
-	// State machine
-	// 0 = Reading AccountID
-	// 1 = Skipping Username
-	// 2 = Skipping PIN
-	// 3 = Reading Balance
-	// 4 = Skipping rest of line
-	int state = 0;
+    /* Overwrite the balance field with new amount */
+    snprintf(bal_str, BAL_FIELD + 1, "%015.2f", new_balance);
+    lseek(fd, bal_pos, SEEK_SET);
+    write(fd, bal_str, BAL_FIELD);
 
-	lseek(fd, 0, SEEK_SET);
-
-	while (read(fd, &ch, 1) > 0) {
-
-	// --- STATE 0: Read AccountID ---
-	if (state == 0) {
-	    if (ch == '|') {
-		current_field[idx] = '\0';
-		idx = 0;
-		
-		if (strcmp(current_field, target_id) == 0) {
-		    state = 1;
-		} else {
-		    state = 4;
-		}
-	    } else if(ch == '\n' || ch == '\r') {
-	    	idx = 0;
-	    } else {
-		if (idx < MAX_FIELD - 1) current_field[idx++] = ch;
-	    }
-	}
-
-	// --- STATE 1: Skip Username ---
-	else if (state == 1) {
-	    if (ch == '|') {
-		state = 2;
-	    }
-	}
-
-	// --- STATE 2: Skip PIN ---
-	else if (state == 2) {
-	    if (ch == '|') {
-		idx = 0;
-		balance_position = lseek(fd, 0, SEEK_CUR); // Save position
-		state = 3;
-	    }
-	}
-
-	// --- STATE 3: Read Balance ---
-	else if (state == 3) {
-	    if (ch == '|') {
-		current_field[idx] = '\0';
-		
-		// Calculate new balance
-		old_balance = atof(current_field);
-		new_balance = old_balance + *deposit_amt;
-		*deposit_amt = new_balance;
-		
-		// Convert new balance to string
-		char new_balance_str[MAX_FIELD];
-		int new_len = snprintf(new_balance_str, MAX_FIELD, "%015.2f", new_balance);
-		int old_len = strlen(current_field);
-		
-		// Seek back to balance position and write new balance
-		lseek(fd, balance_position, SEEK_SET);
-		write(fd, new_balance_str, new_len);
-		
-		// If new balance is shorter, pad with spaces
-		for (int i = new_len; i < old_len; i++) {
-		    write(fd, " ", 1);
-		}
-		
-		// Unlock the file using v()
-		v(semid);
-		return 0; // Success
-	    } else {
-		if (idx < MAX_FIELD - 1) current_field[idx++] = ch;
-	    }
-	}
-
-	// --- STATE 4: Skip rest of line ---
-	else if (state == 4) {
-	    if (ch == '\n') {
-		state = 0;
-		idx = 0;
-	    }
-	}
-	}
-
-	
-
-	v(semid);
-	return 1;
+    v(semid);
+    return 0;
 }
 
 int withdraw_amount(int fd, int semid, const char *target_id, double* withdraw_amt) {
-
-    // Lock the file using p()
     p(semid);
+    int row = search_row(fd, target_id);
+    if (row == -1) {
+    	v(semid); 
+    	return -1; /* If row not found, unlock semaphore and return -1 */
+    }
+
+    char bal_str[BAL_FIELD + 1];
+    off_t bal_pos = (off_t)row * ROW_SIZE + BAL_OFFSET;
+    lseek(fd, bal_pos, SEEK_SET);
     
-    char ch;
-    char current_field[MAX_FIELD];
-    int idx = 0;
-    off_t balance_position = 0;
-    double current_balance, new_balance;
-    
-    
-    // State machine
-    // 0 = Reading AccountID
-    // 1 = Skipping Username
-    // 2 = Skipping PIN
-    // 3 = Reading Balance
-    // 4 = Skipping rest of line
-    int state = 0;
-    
-    lseek(fd, 0, SEEK_SET);
-    
-    while (read(fd, &ch, 1) > 0) {
-        
-        // --- STATE 0: Read AccountID ---
-        if (state == 0) {
-            if (ch == '|') {
-                current_field[idx] = '\0';
-                idx = 0;
-                
-                if (strcmp(current_field, target_id) == 0) {
-                    state = 1;
-                } else {
-                    state = 4;
-                }
-	    } else if(ch == '\n' || ch == '\r') {
-	    	idx = 0;
-            } else {
-                if (idx < MAX_FIELD - 1) current_field[idx++] = ch;
-            }
-        }
-        
-        // --- STATE 1: Skip Username ---
-        else if (state == 1) {
-            if (ch == '|') {
-                state = 2;
-            }
-        }
-        
-        // --- STATE 2: Skip PIN ---
-        else if (state == 2) {
-            if (ch == '|') {
-                idx = 0;
-                balance_position = lseek(fd, 0, SEEK_CUR); // Save position
-                state = 3;
-            }
-        }
-        
-        // --- STATE 3: Read Balance ---
-        else if (state == 3) {
-            if (ch == '|') {
-                current_field[idx] = '\0';
-                
-                current_balance = atof(current_field);
-                
-                if (current_balance < *withdraw_amt) {
-                    // Insufficient balance
-                    v(semid);
-                    return 1;
-                }
-                
-                // Calculate new balance
-                new_balance = current_balance - *withdraw_amt;
-                *withdraw_amt = new_balance;
-                
-                // Convert new balance to string
-                char new_balance_str[MAX_FIELD];
-                int new_len = snprintf(new_balance_str, MAX_FIELD, "%015.2f", new_balance);
-                int old_len = strlen(current_field);
-                
-                // Seek back to balance position and write new balance
-                lseek(fd, balance_position, SEEK_SET);
-                write(fd, new_balance_str, new_len);
-                
-                // If new balance is shorter, pad with spaces
-                for (int i = new_len; i < old_len; i++) {
-                    write(fd, " ", 1);
-                }
-                
-                v(semid);
-                return 0; // Success
-            } else {
-                if (idx < MAX_FIELD - 1) current_field[idx++] = ch;
-            }
-        }
-        
-        // --- STATE 4: Skip rest of line ---
-        else if (state == 4) {
-            if (ch == '\n') {
-                state = 0;
-                idx = 0;
-            }
-        }
+    if (read(fd, bal_str, BAL_FIELD) != BAL_FIELD) {
+    	v(semid); 
+    	return -1;
     }
     
+    bal_str[BAL_FIELD] = '\0';
+
+    /* Checks if current balance is enough to withdraw */
+    double current_balance = atof(bal_str);
+    if (current_balance < *withdraw_amt) {
+    	v(semid); 
+    	return -1;
+    }
+
+    /* Update back to server the new_bal */
+    double new_balance = current_balance - *withdraw_amt;
+    *withdraw_amt = new_balance;
+
+    /* Overwrite the balance field with new amount */
+    snprintf(bal_str, BAL_FIELD + 1, "%015.2f", new_balance);
+    lseek(fd, bal_pos, SEEK_SET);
+    write(fd, bal_str, BAL_FIELD);
+
     v(semid);
-    return 1; // Account not found
+    return 0;
 }
 
