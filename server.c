@@ -52,7 +52,7 @@ int main() {
 	}
 	
 	/* Opening accounts.txt */
-	acc_fd = open("accounts.txt", O_RDONLY);
+	acc_fd = open(ACC_FILE, O_RDWR);
 	if (acc_fd == -1) {
 		perror("Error opening file");
 		return 1;
@@ -219,7 +219,6 @@ int server_login(int sockfd, int acc_fd, char* cmd, char* rsp) {
 	char *tmp = strtok(cmd, ":");
 	char *id = strtok(NULL, ":");
 	char *pin = strtok(NULL, ":");
-	printf("This is the id pin: %s %s", id, pin);
 
 	result = verify_user(acc_fd, id, pin);
 	if(result < 0) {
@@ -254,11 +253,10 @@ int server_checkbal(int sockfd, int acc_fd, char* cmd, char* rsp) {
 	/* Parse the ID from the client command */
 	char *tmp = strtok(cmd, ":");
 	char *id = strtok(NULL, ":");
-	printf("This is the id: %s", id);
 
 	check_balance(acc_fd, id, &bal);
 	
-	snprintf(buf, MAX_BUF, "%s:%f", VAL, bal); /* Concatenate VAL:balance */
+	snprintf(buf, MAX_BUF, "%s:%.2f", VAL, bal); /* Concatenate VAL:balance */
 	printf("%s\n", buf);
 	
 	if(send(sockfd, buf, strlen(buf) + 1, 0) < 0) perror("Send failed");
@@ -276,7 +274,6 @@ int server_withdraw(int sockfd, int acc_fd, int semid, char* cmd, char* rsp) {
 	char *id = strtok(NULL, ":");
 	char *amt = strtok(NULL, ":");
 	
-	printf("This is the id amt: %s %s", id, amt);
 	bal = atof(amt);
 
 	insuff_bal = withdraw_amount(acc_fd, semid, id, &bal);
@@ -287,7 +284,7 @@ int server_withdraw(int sockfd, int acc_fd, int semid, char* cmd, char* rsp) {
 		return(-1);
 	}
 	
-	snprintf(buf, MAX_BUF, "%s:%f", OK, bal); /* Concatenate OK:new_bal */
+	snprintf(buf, MAX_BUF, "%s:%.2f", OK, bal); /* Concatenate OK:new_bal */
 	
 	if(send(sockfd, buf, strlen(buf) + 1, 0) < 0) perror("Send failed");
 	strcpy(rsp, buf);
@@ -303,12 +300,11 @@ int server_deposit(int sockfd, int acc_fd, int semid, char* cmd, char* rsp) {
 	char *id = strtok(NULL, ":");
 	char *amt = strtok(NULL, ":");
 	
-	printf("This is the id amt: %s %s", id, amt);
 	bal = atof(amt);
 
 	deposit_amount(acc_fd, semid, id, &bal);
 	
-	snprintf(buf, MAX_BUF, "%s:%f", OK, bal); /* Concatenate OK:new_bal */
+	snprintf(buf, MAX_BUF, "%s:%.2f", OK, bal); /* Concatenate OK:new_bal */
 	
 	if(send(sockfd, buf, strlen(buf) + 1, 0) < 0) perror("Send failed");
 	strcpy(rsp, buf);

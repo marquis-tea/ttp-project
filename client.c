@@ -147,7 +147,7 @@ int main() {
 			clear_stdin();
 
 			show_loading("Processing Deposit");
-			snprintf(send_buf, MAX_BUF, DEP ":%s:%f", id, amount); 
+			snprintf(send_buf, MAX_BUF, DEP ":%s:%.2f", id, amount); 
 			send(sockfd, send_buf, strlen(send_buf) + 1, 0);
 
 			bzero(recv_buf, sizeof(recv_buf));
@@ -164,7 +164,7 @@ int main() {
 			clear_stdin();
 
 			show_loading("Processing Withdrawal");
-			snprintf(send_buf, MAX_BUF, WDW ":%s:%f", id, amount);
+			snprintf(send_buf, MAX_BUF, WDW ":%s:%.2f", id, amount);
 			send(sockfd, send_buf, strlen(send_buf) + 1, 0);
 
 			bzero(recv_buf, sizeof(recv_buf));

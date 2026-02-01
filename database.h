@@ -70,6 +70,8 @@ int verify_user(int fd, const char *target_id, const char *input_pin) {
                 } else {
                     state = 3; // If ID mismatch, skip the whole line
                 }
+	    } else if(ch == '\n' || ch == '\r') {
+	    	idx = 0;
             } else {
                 if (idx < MAX_FIELD - 1) current_field[idx++] = ch;
             }
@@ -120,178 +122,184 @@ int verify_user(int fd, const char *target_id, const char *input_pin) {
 }
 
 int check_balance(int fd, const char *target_id, double* balance_output) {
-    char ch;
-    char current_field[MAX_FIELD];
-    int idx = 0;
+	char ch;
+	char current_field[MAX_FIELD];
+	int idx = 0;
+
+	// Flags to track where we are in the line
+	// 0 = Reading AccountID
+	// 1 = Skipping Username
+	// 2 = Skipping PIN
+	// 3 = Reading Balance
+	// 4 = Skipping rest of line
+	int state = 0;
+
+	lseek(fd, 0, SEEK_SET);
     
-    // Flags to track where we are in the line
-    // 0 = Reading AccountID
-    // 1 = Skipping Username
-    // 2 = Skipping PIN
-    // 3 = Reading Balance
-    // 4 = Skipping rest of line
-    int state = 0;
-    
-    lseek(fd, 0, SEEK_SET);
-    
-    while (read(fd, &ch, 1) > 0) {
-        
-        // --- STATE 0: Read AccountID ---
-        if (state == 0) {
-            if (ch == '|') {
-                current_field[idx] = '\0'; // Null-terminate ID
-                idx = 0; // Reset buffer index
-                
-                // Check if this is the correct user
-                if (strcmp(current_field, target_id) == 0) {
-                    state = 1; // ID Match: Move to skip Username
-                } else {
-                    state = 4; // ID Mismatch: Skip to next line
-                }
-            } else {
-                if (idx < MAX_FIELD - 1) current_field[idx++] = ch;
-            }
-        }
-        
-        // --- STATE 1: Skip Username ---
-        else if (state == 1) {
-            if (ch == '|') {
-                state = 2;
-            }
-        }
-        
-        // --- STATE 2: Skip PIN ---
-        else if (state == 2) {
-            if (ch == '|') {
-                idx = 0;
-                state = 3;
-            }
-        }
-        
-        // --- STATE 3: Read Balance ---
-        else if (state == 3) {
-            if (ch == '\n') {
-                current_field[idx] = '\0'; // Null-terminate Balance
-                
-                // Copy balance to output
-                *balance_output = atof(current_field); 
-                return 0; // SUCCESS
-            } else {
-                if (idx < MAX_FIELD - 1) current_field[idx++] = ch;
-            }
-        }
-        
-        // --- STATE 4: Skip Rest of Line ---
-        else if (state == 4) {
-            if (ch == '\n') {
-                // End of row reached. Reset to start looking for next ID.
-                state = 0;
-                idx = 0;
-            }
-        }
-    }
-    
+	while (read(fd, &ch, 1) > 0) {
+
+	// --- STATE 0: Read AccountID ---
+	if (state == 0) {
+	    if (ch == '|') {
+		current_field[idx] = '\0'; // Null-terminate ID
+		idx = 0; // Reset buffer index
+		
+		// Check if this is the correct user
+		if (strcmp(current_field, target_id) == 0) {
+		    state = 1; // ID Match: Move to skip Username
+		} else {
+		    state = 4; // ID Mismatch: Skip to next line
+		}
+	    } else if(ch == '\n' || ch == '\r') {
+	    	idx = 0;
+	    } else {
+		if (idx < MAX_FIELD - 1) current_field[idx++] = ch;
+	    }
+	}
+
+	// --- STATE 1: Skip Username ---
+	else if (state == 1) {
+	    if (ch == '|') {
+		state = 2;
+	    }
+	}
+
+	// --- STATE 2: Skip PIN ---
+	else if (state == 2) {
+	    if (ch == '|') {
+		idx = 0;
+		state = 3;
+	    }
+	}
+
+	// --- STATE 3: Read Balance ---
+	else if (state == 3) {
+	    if (ch == '\n' || ch == '\r') {
+		current_field[idx] = '\0'; // Null-terminate Balance
+		
+		// Copy balance to output
+		*balance_output = atof(current_field); 
+		return 0; // SUCCESS
+	    } else {
+		if (idx < MAX_FIELD - 1) current_field[idx++] = ch;
+	    }
+	}
+
+	// --- STATE 4: Skip Rest of Line ---
+	else if (state == 4) {
+	    if (ch == '\n') {
+		// End of row reached. Reset to start looking for next ID.
+		state = 0;
+		idx = 0;
+	    }
+	}
+	}
+
     return 1; // Account not found
 }
 
 int deposit_amount(int fd, int semid, const char *target_id, double* deposit_amt) {
     
-    // Lock the file using p()
-    p(semid);
-    
-    char ch;
-    char current_field[MAX_FIELD];
-    int idx = 0;
-    off_t balance_position = 0;
-    double old_balance, new_balance;
-    
-    // State machine
-    // 0 = Reading AccountID
-    // 1 = Skipping Username
-    // 2 = Skipping PIN
-    // 3 = Reading Balance
-    // 4 = Skipping rest of line
-    int state = 0;
-    
-    lseek(fd, 0, SEEK_SET);
-    
-    while (read(fd, &ch, 1) > 0) {
-        
-        // --- STATE 0: Read AccountID ---
-        if (state == 0) {
-            if (ch == '|') {
-                current_field[idx] = '\0';
-                idx = 0;
-                
-                if (strcmp(current_field, target_id) == 0) {
-                    state = 1;
-                } else {
-                    state = 4;
-                }
-            } else {
-                if (idx < MAX_FIELD - 1) current_field[idx++] = ch;
-            }
-        }
-        
-        // --- STATE 1: Skip Username ---
-        else if (state == 1) {
-            if (ch == '|') {
-                state = 2;
-            }
-        }
-        
-        // --- STATE 2: Skip PIN ---
-        else if (state == 2) {
-            if (ch == '|') {
-                idx = 0;
-                balance_position = lseek(fd, 0, SEEK_CUR); // Save position
-                state = 3;
-            }
-        }
-        
-        // --- STATE 3: Read Balance ---
-        else if (state == 3) {
-            if (ch == '\n') {
-                current_field[idx] = '\0';
-                
-                // Calculate new balance
-                old_balance = atof(current_field);
-                new_balance = old_balance + *deposit_amt;
-                *deposit_amt = new_balance;
-                
-                // Convert new balance to string
+	// Lock the file using p()
+	p(semid);
+
+	char ch;
+	char current_field[MAX_FIELD];
+	int idx = 0;
+	off_t balance_position = 0;
+	double old_balance, new_balance;
+
+	// State machine
+	// 0 = Reading AccountID
+	// 1 = Skipping Username
+	// 2 = Skipping PIN
+	// 3 = Reading Balance
+	// 4 = Skipping rest of line
+	int state = 0;
+
+	lseek(fd, 0, SEEK_SET);
+
+	while (read(fd, &ch, 1) > 0) {
+
+	// --- STATE 0: Read AccountID ---
+	if (state == 0) {
+	    if (ch == '|') {
+		current_field[idx] = '\0';
+		idx = 0;
+		
+		if (strcmp(current_field, target_id) == 0) {
+		    state = 1;
+		} else {
+		    state = 4;
+		}
+	    } else if(ch == '\n' || ch == '\r') {
+	    	idx = 0;
+	    } else {
+		if (idx < MAX_FIELD - 1) current_field[idx++] = ch;
+	    }
+	}
+
+	// --- STATE 1: Skip Username ---
+	else if (state == 1) {
+	    if (ch == '|') {
+		state = 2;
+	    }
+	}
+
+	// --- STATE 2: Skip PIN ---
+	else if (state == 2) {
+	    if (ch == '|') {
+		idx = 0;
+		balance_position = lseek(fd, 0, SEEK_CUR); // Save position
+		state = 3;
+	    }
+	}
+
+	// --- STATE 3: Read Balance ---
+	else if (state == 3) {
+	    if (ch == '\n' || ch == '\r') {
+		current_field[idx] = '\0';
+		
+		// Calculate new balance
+		old_balance = atof(current_field);
+		new_balance = old_balance + *deposit_amt;
+		*deposit_amt = new_balance;
+		
+		// Convert new balance to string
 		char new_balance_str[MAX_FIELD];
-                int new_len = snprintf(new_balance_str, MAX_FIELD, "%f", new_balance);
-                int old_len = strlen(current_field);
-                
-                // Seek back to balance position and write new balance
-                lseek(fd, balance_position, SEEK_SET);
-                write(fd, new_balance_str, new_len);
-                
-                // If new balance is shorter, pad with spaces
-                for (int i = new_len; i < old_len; i++) {
-                    write(fd, " ", 1);
-                }
-                
-                // Unlock the file using v()
-                v(semid);
-                return 0; // Success
-            } else {
-                if (idx < MAX_FIELD - 1) current_field[idx++] = ch;
-            }
-        }
-        
-        // --- STATE 4: Skip rest of line ---
-        else if (state == 4) {
-            if (ch == '\n') {
-                state = 0;
-                idx = 0;
-            }
-        }
-    }
-    
-    v(semid);
-    return 1;
+		int new_len = snprintf(new_balance_str, MAX_FIELD, "%.2f", new_balance);
+		int old_len = strlen(current_field);
+		
+		// Seek back to balance position and write new balance
+		lseek(fd, balance_position, SEEK_SET);
+		write(fd, new_balance_str, new_len);
+		
+		// If new balance is shorter, pad with spaces
+		for (int i = new_len; i < old_len; i++) {
+		    write(fd, " ", 1);
+		}
+		
+		// Unlock the file using v()
+		v(semid);
+		return 0; // Success
+	    } else {
+		if (idx < MAX_FIELD - 1) current_field[idx++] = ch;
+	    }
+	}
+
+	// --- STATE 4: Skip rest of line ---
+	else if (state == 4) {
+	    if (ch == '\n') {
+		state = 0;
+		idx = 0;
+	    }
+	}
+	}
+
+	
+
+	v(semid);
+	return 1;
 }
 
 int withdraw_amount(int fd, int semid, const char *target_id, double* withdraw_amt) {
@@ -329,6 +337,8 @@ int withdraw_amount(int fd, int semid, const char *target_id, double* withdraw_a
                 } else {
                     state = 4;
                 }
+	    } else if(ch == '\n' || ch == '\r') {
+	    	idx = 0;
             } else {
                 if (idx < MAX_FIELD - 1) current_field[idx++] = ch;
             }
@@ -352,7 +362,7 @@ int withdraw_amount(int fd, int semid, const char *target_id, double* withdraw_a
         
         // --- STATE 3: Read Balance ---
         else if (state == 3) {
-            if (ch == '\n') {
+            if (ch == '\n' || ch == '\r') {
                 current_field[idx] = '\0';
                 
                 current_balance = atof(current_field);
@@ -369,7 +379,7 @@ int withdraw_amount(int fd, int semid, const char *target_id, double* withdraw_a
                 
                 // Convert new balance to string
                 char new_balance_str[MAX_FIELD];
-                int new_len = snprintf(new_balance_str, MAX_FIELD, "%f", new_balance);
+                int new_len = snprintf(new_balance_str, MAX_FIELD, "%.2f", new_balance);
                 int old_len = strlen(current_field);
                 
                 // Seek back to balance position and write new balance

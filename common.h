@@ -22,6 +22,7 @@
 #define MAX_CLI 10
 #define MAX_BUF 256
 #define MAX_ALRT 50
+#define ACC_FILE "accounts.txt"
 
 /* Commands and Responses */
 #define ERR_PIN "ERR_PIN"
