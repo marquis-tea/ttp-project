@@ -273,11 +273,8 @@ int server_login(int sockfd, int acc_fd, char* cmd, char* rsp) {
 	char *pin = strtok(NULL, ":");
 
 	result = verify_user(acc_fd, id, pin);
-	if(result < 0) {
-		valid_id = 0;
-	} else if(result > 0) {
+	if(result > 0) {
 		valid_id = 1;
-		valid_pin = 0;
 	} else {
 		valid_id = 1;
 		valid_pin = 1;
@@ -310,7 +307,7 @@ int server_checkbal(int sockfd, int acc_fd, char* cmd, char* rsp) {
 	char *tmp = strtok(cmd, ":");
 	char *id = strtok(NULL, ":");
 
-	check_balance(acc_fd, id, &bal);
+	if(check_balance(acc_fd, id, &bal) < 0) perror("Check balance failed");
 	
 	snprintf(buf, MAX_BUF, "%s:%.2f", VAL, bal); /* Concatenate VAL:balance */
 	
@@ -323,7 +320,7 @@ int server_checkbal(int sockfd, int acc_fd, char* cmd, char* rsp) {
 /* Handling withdrawal command */
 int server_withdraw(int sockfd, int acc_fd, int semid, char* cmd, char* rsp) {
 	double bal = 0;
-	int insuff_bal = 0;
+	int status = 0;
 	char buf[MAX_BUF];
 	
 	/* Parse the ID and Amount from the client command */
@@ -333,9 +330,9 @@ int server_withdraw(int sockfd, int acc_fd, int semid, char* cmd, char* rsp) {
 	
 	bal = atof(amt);
 
-	insuff_bal = withdraw_amount(acc_fd, semid, id, &bal);
+	status = withdraw_amount(acc_fd, semid, id, &bal);
 	
-	if(insuff_bal) {
+	if(status < 0) {
 		printf("[SERVER] Sending to client: %s\n", ERR_BAL);
 		if(send(sockfd, ERR_BAL, strlen(ERR_BAL), 0) < 0) perror("Send failed");
 		strcpy(rsp, ERR_BAL);
@@ -362,7 +359,7 @@ int server_deposit(int sockfd, int acc_fd, int semid, char* cmd, char* rsp) {
 	
 	bal = atof(amt);
 
-	deposit_amount(acc_fd, semid, id, &bal);
+	if(deposit_amount(acc_fd, semid, id, &bal) < 0) perror("Deposit amount failed");
 	
 	snprintf(buf, MAX_BUF, "%s:%.2f", OK, bal); /* Concatenate OK:new_bal */
 	
