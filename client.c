@@ -56,7 +56,7 @@ int main() {
 
 	serv_addr.sin_family = AF_INET;
 	serv_addr.sin_port = htons(SERV_TCP_PORT);
-	serv_addr.sin_addr.s_addr = inet_addr("192.168.0.16");
+	serv_addr.sin_addr.s_addr = inet_addr("192.168.0.16"); /* Change server IP address here */
 
 	if (connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
 		printf("%s[!] SYSTEM OFFLINE. Try again later.%s\n", BOLD_RED, RESET);
